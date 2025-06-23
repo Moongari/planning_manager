@@ -2,7 +2,7 @@ import customtkinter as ctk
 import tkinter as tk
 from tkinter import messagebox, ttk, filedialog
 import datetime
-import openpyxl
+
 
 # --- Constantes et données ---
 SHIFTS = [

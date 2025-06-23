@@ -4,16 +4,7 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="f4dfb3c6-3fcf-416c-9b56-e51fe2e39e5f" name="Changes" comment="">
-      <change beforePath="$PROJECT_DIR$/.idea/planning_manager.iml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/planning_manager.iml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/__init__.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/exporter.py" beforeDir="false" afterPath="$PROJECT_DIR$/exporter.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/generator.py" beforeDir="false" afterPath="$PROJECT_DIR$/generator.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/main.py" beforeDir="false" afterPath="$PROJECT_DIR$/main.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/planning.py" beforeDir="false" afterPath="$PROJECT_DIR$/planning.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/requirement.txt" beforeDir="false" afterPath="$PROJECT_DIR$/requirement.txt" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tasks.py" beforeDir="false" afterPath="$PROJECT_DIR$/tasks.py" afterDir="false" />
+    <list default="true" id="f4dfb3c6-3fcf-416c-9b56-e51fe2e39e5f" name="Changes" comment="new interface">
       <change beforePath="$PROJECT_DIR$/ui.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
@@ -129,7 +120,20 @@
       <option name="presentableId" value="Default" />
       <updated>1750680639777</updated>
     </task>
+    <task id="LOCAL-00001" summary="new interface">
+      <option name="closed" value="true" />
+      <created>1750702410090</created>
+      <option name="number" value="00001" />
+      <option name="presentableId" value="LOCAL-00001" />
+      <option name="project" value="LOCAL" />
+      <updated>1750702410090</updated>
+    </task>
+    <option name="localTasksCounter" value="2" />
     <servers />
+  </component>
+  <component name="VcsManagerConfiguration">
+    <MESSAGE value="new interface" />
+    <option name="LAST_COMMIT_MESSAGE" value="new interface" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>
