@@ -3,7 +3,6 @@ import tkinter as tk
 from tkinter import messagebox, ttk, filedialog
 import datetime
 
-
 # --- Constantes et données ---
 SHIFTS = [
     ("07:00", "15:15"),
@@ -134,6 +133,9 @@ class PlanningApp(ctk.CTk):
         self.btn_manage_rest = ctk.CTkButton(nav_frame, text="Gérer repos", command=self.open_manage_rest_window)
         self.btn_manage_rest.pack(side="right", padx=10)
 
+        self.btn_export_excel = ctk.CTkButton(nav_frame, text="Exporter Excel", command=self.export_to_excel)
+        self.btn_export_excel.pack(side="right", padx=10)
+
         self.refresh_planning_table()
 
     def show_task_details_popup(self, person, date, shift):
@@ -145,7 +147,6 @@ class PlanningApp(ctk.CTk):
         total_duration = sum(t['duration'] for t in tasks)
         max_load = MAX_SHIFT_LOADS.get(shift, 240)
 
-        # ✅ Message d'alerte si surcharge
         if total_duration > max_load:
             alert_text = f"Surcharge détectée : {total_duration} min / {max_load} min ⚠️"
             alert_color = "#ff4d4d"
@@ -153,12 +154,12 @@ class PlanningApp(ctk.CTk):
             alert_text = f"Charge : {total_duration} min / {max_load} min"
             alert_color = "#228822"
 
-        alert_label = ctk.CTkLabel(win, text=alert_text, fg_color=alert_color, corner_radius=8, width=300, height=40)
+
+        alert_label = ctk.CTkLabel(win, text=alert_text, fg_color=alert_color, text_color="black", corner_radius=8, width=300, height=40)
+
         alert_label.pack(pady=10)
 
-        # ✅ Liste des tâches
         if tasks:
-
             for t in tasks:
                 txt = f"{t['name']} - {t['duration']} min"
                 ctk.CTkLabel(win, text=txt, justify="left", anchor="w").pack(fill="x", padx=10, pady=2)
@@ -254,11 +255,9 @@ class PlanningApp(ctk.CTk):
                         text = ""
 
                     lbl_cell = ctk.CTkLabel(self.inner_frame, text=text, width=60, height=70, fg_color=bg_color, corner_radius=5, justify="left", wraplength=55, text_color="white" if bg_color != "#555555" else "lightgray")
-                    # 👉 Ajouter un clic si des tâches existent
                     if tasks:
                         lbl_cell.bind("<Button-1>",
-                                      lambda e, p=person, d=date, s=shift_idx: self.show_task_details_popup(p, d, s))
-
+                                      lambda e, p=person, dt=date, s=shift_idx: self.show_task_details_popup(p, dt, s))
                     lbl_cell.grid(row=row, column=d, sticky="nsew", padx=1, pady=1)
 
                 row += 1
@@ -280,75 +279,121 @@ class PlanningApp(ctk.CTk):
         self.refresh_planning_table()
 
     def open_add_task_window(self):
-        AddTaskWindow(self)
+        win = ctk.CTkToplevel(self)
+        win.title("Ajouter tâche")
+        center_window(win, 400, 400)
+
+        name_var = tk.StringVar()
+        duration_var = tk.IntVar(value=30)
+        person_var = tk.StringVar()
+        date_var = tk.StringVar()
+        shift_var = tk.IntVar(value=0)
+
+        ctk.CTkLabel(win, text="Nom tâche :").pack(pady=5)
+        combo_name = ctk.CTkComboBox(win, values=TASK_NAMES, variable=name_var)
+        combo_name.pack()
+
+        ctk.CTkLabel(win, text="Durée (min) :").pack(pady=5)
+        combo_dur = ctk.CTkComboBox(win, values=[str(d) for d in DURATION_OPTIONS], variable=duration_var)
+        combo_dur.pack()
+
+        ctk.CTkLabel(win, text="Personne :").pack(pady=5)
+        combo_person = ctk.CTkComboBox(win, values=self.persons, variable=person_var)
+        combo_person.pack()
+
+        ctk.CTkLabel(win, text="Date (AAAA-MM-JJ) :").pack(pady=5)
+        entry_date = ctk.CTkEntry(win, textvariable=date_var)
+        entry_date.pack()
+
+        ctk.CTkLabel(win, text="Shift :").pack(pady=5)
+        combo_shift = ctk.CTkComboBox(win, values=[str(i) for i in range(len(self.shifts))], variable=shift_var)
+        combo_shift.pack()
+
+        def add_task_action():
+            name = name_var.get()
+            try:
+                duration = int(duration_var.get())
+            except Exception:
+                messagebox.showerror("Erreur", "Durée invalide")
+                return
+
+            person = person_var.get()
+            try:
+                date = datetime.datetime.strptime(date_var.get(), "%Y-%m-%d").date()
+            except ValueError:
+                messagebox.showerror("Erreur", "Date invalide (AAAA-MM-JJ)")
+                return
+
+            shift = shift_var.get()
+            if not name or not person:
+                messagebox.showerror("Erreur", "Nom tâche et personne obligatoires")
+                return
+
+            task = {
+                'name': name,
+                'duration': duration,
+                'assigned_to': (person, date, int(shift))
+            }
+            self.task_manager.add_task(task)
+            self.refresh_planning_table()
+            win.destroy()
+
+        btn_add = ctk.CTkButton(win, text="Ajouter", command=add_task_action)
+        btn_add.pack(pady=15)
 
     def show_overloads(self):
         overloads = detect_overloads(self.task_manager.get_tasks())
+        if not overloads:
+            messagebox.showinfo("Surcharges", "Aucune surcharge détectée.")
+            return
+
         win = ctk.CTkToplevel(self)
         win.title("Surcharges détectées")
-        center_window(win, 400, 300)
+        center_window(win, 500, 400)
 
-        if overloads:
-            shift_names = ["Matin", "Après-midi", "Soir"]
-            for (person, date, shift), total in overloads.items():
-                txt = f"{person} le {format_date(date)} ({shift_names[shift]}): {total} min"
-                ctk.CTkLabel(win, text=txt, justify="left").pack(anchor="w", padx=10, pady=5)
-        else:
-            ctk.CTkLabel(win, text="Aucune surcharge détectée.", justify="center").pack(expand=True, pady=20)
+        for (person, date, shift), dur in overloads.items():
+            max_load = MAX_SHIFT_LOADS.get(shift, 240)
+            txt = f"{person} le {format_date(date)} Shift {shift}: {dur} min / {max_load} min"
+            ctk.CTkLabel(win, text=txt, fg_color="#ff4d4d", corner_radius=8, width=450, height=30).pack(pady=3)
 
-class AddTaskWindow(ctk.CTkToplevel):
-    def __init__(self, master, task=None):
-        super().__init__(master)
-        self.master = master
-        self.task = task
-        self.title("Ajouter tâche")
-        center_window(self, 360, 400)
+        ctk.CTkButton(win, text="Fermer", command=win.destroy).pack(pady=10)
 
-        ctk.CTkLabel(self, text="Nom tâche:").pack()
-        self.combo_name = ctk.CTkComboBox(self, values=TASK_NAMES)
-        self.combo_name.pack()
+    def export_to_excel(self):
+        from openpyxl import Workbook
+        from openpyxl.utils import get_column_letter
 
-        ctk.CTkLabel(self, text="Personne:").pack()
-        self.combo_person = ctk.CTkComboBox(self, values=self.master.persons)
-        self.combo_person.pack()
+        filepath = filedialog.asksaveasfilename(
+            defaultextension=".xlsx",
+            filetypes=[("Fichiers Excel", "*.xlsx")],
+            title="Enregistrer planning sous..."
+        )
+        if not filepath:
+            return
 
-        ctk.CTkLabel(self, text="Date (AAAA-MM-JJ):").pack()
-        self.entry_date = ctk.CTkEntry(self)
-        self.entry_date.pack()
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Planning Tâches"
 
-        ctk.CTkLabel(self, text="Shift (0, 1, 2):").pack()
-        self.combo_shift = ctk.CTkComboBox(self, values=["0", "1", "2"])
-        self.combo_shift.pack()
+        headers = ["Personne", "Date", "Shift", "Nom tâche", "Durée (min)"]
+        ws.append(headers)
 
-        ctk.CTkLabel(self, text="Durée (min):").pack()
-        self.combo_duration = ctk.CTkComboBox(self, values=[str(d) for d in DURATION_OPTIONS])
-        self.combo_duration.pack()
+        tasks = self.task_manager.get_tasks()
+        for t in tasks:
+            person, date, shift = t['assigned_to']
+            row = [person, format_date(date), shift, t['name'], t['duration']]
+            ws.append(row)
 
-        self.btn_add = ctk.CTkButton(self, text="Ajouter", command=self.add_task)
-        self.btn_add.pack(pady=10)
-
-    def add_task(self):
-        name = self.combo_name.get()
-        person = self.combo_person.get()
-        date_str = self.entry_date.get().strip()
-        shift = int(self.combo_shift.get())
-        duration = int(self.combo_duration.get())
+        # Ajuster largeur colonnes
+        for col_idx, col_title in enumerate(headers, start=1):
+            max_length = len(col_title)
+            for cell in ws[get_column_letter(col_idx)]:
+                if cell.value:
+                    max_length = max(max_length, len(str(cell.value)))
+            ws.column_dimensions[get_column_letter(col_idx)].width = max_length + 2
 
         try:
-            date = datetime.datetime.strptime(date_str, "%Y-%m-%d").date()
-        except ValueError:
-            messagebox.showerror("Erreur", "Date invalide (AAAA-MM-JJ)")
-            return
-
-        # 🚨 Vérification si c'est un jour de repos
-        if date in self.master.rest_days.get(person, []):
-            messagebox.showerror("Erreur",
-                                 f"{person} est en repos le {format_date(date)}. Impossible d'ajouter une tâche.")
-            return
-
-        task_data = {"name": name, "assigned_to": (person, date, shift), "duration": duration}
-        self.master.task_manager.add_task(task_data)
-        self.master.refresh_planning_table()
-        self.destroy()
-
+            wb.save(filepath)
+            messagebox.showinfo("Succès", f"Export réussi vers:\n{filepath}")
+        except Exception as e:
+            messagebox.showerror("Erreur", f"Impossible d'enregistrer le fichier:\n{e}")
 
