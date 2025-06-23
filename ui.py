@@ -352,6 +352,3 @@ class AddTaskWindow(ctk.CTkToplevel):
         self.destroy()
 
 
-if __name__ == "__main__":
-    app = PlanningApp()
-    app.mainloop()
