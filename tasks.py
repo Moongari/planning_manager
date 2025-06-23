@@ -1,4 +1,3 @@
-# tasks.py
 class TaskManager:
     def __init__(self):
         self.tasks = {}
@@ -10,7 +9,7 @@ class TaskManager:
             "id": task_id,
             "name": name,
             "duration": duration,
-            "assigned_to": assigned_to  # (person, week) or None
+            "assigned_to": assigned_to  # (person, date, shift) or None
         }
         self.next_id += 1
         return task_id
@@ -29,13 +28,14 @@ class TaskManager:
                 self.tasks[task_id]['assigned_to'] = assigned_to
 
     def get_tasks(self):
-        return self.tasks
+        return list(self.tasks.values())
 
-    def get_tasks_by_person_and_week(self, person, week):
-        result = {}
-        for tid, task in self.tasks.items():
-            if task['assigned_to'] == (person, week):
-                result[tid] = task
+    def get_tasks_for(self, person, date, shift):
+        result = []
+        for task in self.tasks.values():
+            assigned = task.get('assigned_to')
+            if assigned == (person, date, shift):
+                result.append(task)
         return result
 
     def clear_all_tasks(self):
