@@ -296,34 +296,63 @@ class PlanningApp(ctk.CTk):
         btn_save.pack(pady=10)
 
     def refresh_planning_table(self):
-        # Nettoyer les widgets existants
+        import datetime
+        from tkinter import messagebox
+
+        # Supprime les anciens widgets
         for widget in self.inner_frame.winfo_children():
             widget.destroy()
 
-        # Afficher mois / année
-        self.lbl_month.configure(text=f"{self.current_year} - {self.current_month:02d}")
+        # Calcul du nombre de jours dans le mois courant
+        if self.current_month == 12:
+            next_month = datetime.date(self.current_year + 1, 1, 1)
+        else:
+            next_month = datetime.date(self.current_year, self.current_month + 1, 1)
+        last_day_of_month = (next_month - datetime.timedelta(days=1)).day
 
-        # Calculer nombre de jours dans le mois
-        import calendar
-        days_in_month = calendar.monthrange(self.current_year, self.current_month)[1]
-
-        # Affichage planning tableau
-        for col, day in enumerate(range(1, days_in_month + 1)):
-            lbl = ctk.CTkLabel(self.inner_frame, text=str(day), width=30, fg_color="#470", corner_radius=5)
+        # Affichage des en-têtes : jours du mois
+        for col, day in enumerate(range(1, last_day_of_month + 1)):
+            lbl = ctk.CTkLabel(self.inner_frame, text=str(day), width=70, fg_color="#888", corner_radius=5)
             lbl.grid(row=0, column=col + 1, padx=1, pady=1)
 
+        # Affichage des lignes : personnes et boutons
         for row, person in enumerate(self.persons):
-            lbl = ctk.CTkLabel(self.inner_frame, text=person, width=100, fg_color="#470", corner_radius=5,text_color="black")
+            # Nom personne à gauche
+            lbl = ctk.CTkLabel(self.inner_frame, text=person, width=100, fg_color="#470", corner_radius=5,
+                               text_color="black")
             lbl.grid(row=row + 1, column=0, padx=1, pady=1)
 
-            for col, day in enumerate(range(1, days_in_month + 1)):
+            for col, day in enumerate(range(1, last_day_of_month + 1)):
                 date = datetime.date(self.current_year, self.current_month, day)
-                # Afficher shift 0 uniquement pour simplifier (tu peux adapter)
-                tasks = [t for t in self.task_manager.get_tasks() if t['assigned_to'] == (person, date, 0)]
-                color = self.person_colors.get(person, "#450")
-                btn_text = f"{len(tasks)} tâche(s)" if tasks else ""
-                btn = ctk.CTkButton(self.inner_frame, text=btn_text, width=70, height=30, fg_color=color,
-                                    command=lambda p=person, d=date, s=0: self.show_task_details_popup(p, d, s))
+
+                # Vérifier si jour de repos
+                rest_dates = self.rest_days.get(person, [])
+                if date in rest_dates:
+                    # Bouton rouge "Repos"
+                    btn = ctk.CTkButton(
+                        self.inner_frame,
+                        text="Repos",
+                        width=70,
+                        height=30,
+                        fg_color="#a33",
+                        text_color="white",
+                        command=lambda p=person, d=date: messagebox.showinfo("Jour de repos",
+                                                                             f"{p} est en repos le {d.strftime('%d/%m/%Y')}")
+                    )
+                else:
+                    # Chercher les tâches pour ce jour, cette personne et shift 0
+                    tasks = [t for t in self.task_manager.get_tasks() if t['assigned_to'] == (person, date, 0)]
+                    color = self.person_colors.get(person, "#450")
+                    btn_text = f"{len(tasks)} tâche(s)" if tasks else ""
+                    btn = ctk.CTkButton(
+                        self.inner_frame,
+                        text=btn_text,
+                        width=70,
+                        height=30,
+                        fg_color=color,
+                        command=lambda p=person, d=date, s=0: self.show_task_details_popup(p, d, s)
+                    )
+
                 btn.grid(row=row + 1, column=col + 1, padx=2, pady=2)
 
     def prev_month(self):
@@ -414,7 +443,6 @@ class PlanningApp(ctk.CTk):
         btn_add.pack(pady=10)
 
     def open_manage_rest_window(self):
-        # Implémentation simplifiée
         win = ctk.CTkToplevel(self)
         win.title("Gestion des jours de repos")
         center_window(win, 400, 400)
@@ -441,10 +469,22 @@ class PlanningApp(ctk.CTk):
             except ValueError:
                 messagebox.showerror("Erreur", "Date invalide")
                 return
-            p = person_var.get()
+
+            p = person_var.get()  # Accès direct à person_var (pas self.person_var)
+            if not p:
+                messagebox.showerror("Erreur", "Veuillez sélectionner une personne")
+                return
+
+            if p not in self.rest_days:
+                self.rest_days[p] = []
+
             if d not in self.rest_days[p]:
                 self.rest_days[p].append(d)
+                self.rest_days[p].sort()
                 refresh_rest_list()
+                self.refresh_planning_table()
+            else:
+                messagebox.showinfo("Info", "Ce jour est déjà un jour de repos pour cette personne.")
 
         def remove_selected_rest():
             sel = rest_listbox.curselection()
@@ -454,6 +494,7 @@ class PlanningApp(ctk.CTk):
             idx = sel[0]
             del self.rest_days[p][idx]
             refresh_rest_list()
+            self.refresh_planning_table()
 
         btn_add = ctk.CTkButton(win, text="Ajouter repos", command=add_rest_day)
         btn_add.pack(side="left", padx=10, pady=5)
@@ -461,10 +502,7 @@ class PlanningApp(ctk.CTk):
         btn_remove = ctk.CTkButton(win, text="Supprimer repos", command=remove_selected_rest)
         btn_remove.pack(side="left", padx=10, pady=5)
 
-        def on_person_change(event):
-            refresh_rest_list()
-
-        person_combo.bind("<<ComboboxSelected>>", on_person_change)
+        person_combo.bind("<<ComboboxSelected>>", lambda e: refresh_rest_list())
         refresh_rest_list()
 
     def show_overloads(self):

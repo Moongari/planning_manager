@@ -4,7 +4,7 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="f4dfb3c6-3fcf-416c-9b56-e51fe2e39e5f" name="Changes" comment="update files">
+    <list default="true" id="f4dfb3c6-3fcf-416c-9b56-e51fe2e39e5f" name="Changes" comment="Update window and update task by salary">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/ui.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui.py" afterDir="false" />
     </list>
@@ -152,12 +152,21 @@
       <option name="project" value="LOCAL" />
       <updated>1750702643256</updated>
     </task>
-    <option name="localTasksCounter" value="4" />
+    <task id="LOCAL-00004" summary="Update window and update task by salary">
+      <option name="closed" value="true" />
+      <created>1750705994490</created>
+      <option name="number" value="00004" />
+      <option name="presentableId" value="LOCAL-00004" />
+      <option name="project" value="LOCAL" />
+      <updated>1750705994490</updated>
+    </task>
+    <option name="localTasksCounter" value="5" />
     <servers />
   </component>
   <component name="VcsManagerConfiguration">
     <MESSAGE value="new interface" />
     <MESSAGE value="update files" />
-    <option name="LAST_COMMIT_MESSAGE" value="update files" />
+    <MESSAGE value="Update window and update task by salary" />
+    <option name="LAST_COMMIT_MESSAGE" value="Update window and update task by salary" />
   </component>
 </project>
