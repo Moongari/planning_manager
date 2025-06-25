@@ -1,8 +1,11 @@
+import calendar as py_calendar
+
 import customtkinter as ctk
 import tkinter as tk
 from tkinter import messagebox, ttk, filedialog, simpledialog
 import datetime
 import sqlite3
+from exporter import export_to_excel
 
 # --- Constantes et données ---
 SHIFTS = [
@@ -88,16 +91,33 @@ def detect_overloads(tasks, max_by_shift=MAX_SHIFT_LOADS):
 class PlanningApp(ctk.CTk):
     def __init__(self):
         super().__init__()
+        self.on_export_button_click = None
+
         self.title("Planning Manager")
         self.geometry("1200x700")
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("dark-blue")
 
-        self.persons = PERSONS
-        self.person_colors = PERSON_COLORS
-        self.shifts = SHIFTS
+        # Initialiser TaskManager
         self.task_manager = TaskManager()
 
+        # Initialiser SQLite
+        self.conn = sqlite3.connect("planning_manager.db")
+        self.cursor = self.conn.cursor()
+
+        # Créer tables (si nécessaire)
+        self.create_tables()
+
+        # Charger personnes depuis la BDD
+        self.load_persons_from_db()  # 🔁 on récupère self.persons et self.person_colors
+
+        # Initialiser jours de repos
+        self.rest_days = {p: [] for p in self.persons}  # ✅ basé sur self.persons chargé depuis la BDD
+
+        # Charger tâches depuis la BDD
+        self.load_tasks_from_db()
+
+        # Initialiser mois courant
         today = datetime.date.today()
         self.current_year = today.year
         self.current_month = today.month
@@ -117,8 +137,8 @@ class PlanningApp(ctk.CTk):
         self.btn_prev = ctk.CTkButton(nav_frame, text="<", width=30, command=self.prev_month)
         self.btn_prev.pack(side="left")
 
-        self.lbl_month = ctk.CTkLabel(nav_frame, text="", width=150)
-        self.lbl_month.pack(side="left", padx=10)
+        self.lbl_month = ctk.CTkLabel(nav_frame, text="Juin 2025", width=150, text_color="white")
+        self.lbl_month.pack(side="left", padx=10, pady=10)
 
         self.btn_next = ctk.CTkButton(nav_frame, text=">", width=30, command=self.next_month)
         self.btn_next.pack(side="left")
@@ -143,10 +163,16 @@ class PlanningApp(ctk.CTk):
         self.btn_manage_rest = ctk.CTkButton(nav_frame, text="Gérer repos", command=self.open_manage_rest_window)
         self.btn_manage_rest.pack(side="right", padx=10)
 
-        self.btn_export_excel = ctk.CTkButton(nav_frame, text="Exporter Excel", command=self.export_to_excel)
+        self.btn_export_excel = ctk.CTkButton(
+            nav_frame,
+            text="Exporter Excel",
+            command=self.on_export_button_click_handler  # Appelle une fonction que tu vas ajouter juste après
+        )
         self.btn_export_excel.pack(side="right", padx=10)
 
         self.refresh_planning_table()
+
+
 
     def create_tables(self):
         self.cursor.execute("""
@@ -159,6 +185,25 @@ class PlanningApp(ctk.CTk):
                 duration INTEGER NOT NULL
             )
         """)
+        # Table des personnes
+        self.cursor.execute("""
+              CREATE TABLE IF NOT EXISTS persons (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  name TEXT UNIQUE NOT NULL,
+                  color TEXT NOT NULL
+              )
+          """)
+
+        self.cursor.execute("SELECT COUNT(*) FROM persons")
+        if self.cursor.fetchone()[0] == 0:
+            default_persons = [
+                ("Alice", "#9c99ff"),
+                ("Bob", "#99ff99"),
+                ("Charlie", "#9999ff"),
+                ("David", "#ffcc99")
+            ]
+            self.cursor.executemany("INSERT INTO persons (name, color) VALUES (?, ?)", default_persons)
+
         self.conn.commit()
 
     def load_tasks_from_db(self):
@@ -175,10 +220,23 @@ class PlanningApp(ctk.CTk):
             }
             self.task_manager.add_task(task_data)
 
+    def load_persons_from_db(self):
+        self.cursor.execute("SELECT name, color FROM persons")
+        rows = self.cursor.fetchall()
+        self.persons = [row[0] for row in rows]
+        self.person_colors = {row[0]: row[1] for row in rows}
+
+
+
+
     def show_task_details_popup(self, person, date, shift):
         win = ctk.CTkToplevel(self)
         win.title(f"Tâches de {person} le {format_date(date)} (Shift {shift})")
         center_window(win, 450, 400)
+        # 👉 Mettre la fenêtre au premier plan
+        win.attributes('-topmost', True)
+        win.focus_force()
+
 
         tasks = self.task_manager.get_tasks_for(person, date, shift)
         total_duration = sum(t['duration'] for t in tasks)
@@ -210,11 +268,34 @@ class PlanningApp(ctk.CTk):
 
         ctk.CTkButton(win, text="Fermer", command=win.destroy).pack(pady=10)
 
+    def on_export_button_click_handler(self):
+        filename = filedialog.asksaveasfilename(
+            defaultextension=".xlsx",
+            filetypes=[("Fichiers Excel", "*.xlsx")],
+            title="Enregistrer sous"
+        )
+        if filename:
+            try:
+                export_to_excel(
+                    self.persons,
+                    self.task_manager,
+                    self.rest_days,
+                    datetime.date(self.current_year, self.current_month, 1),  # début du mois affiché
+                    filename
+                )
+                messagebox.showinfo("Export réussi", f"Exportation réussie :\n{filename}")
+            except Exception as e:
+                messagebox.showerror("Erreur", f"Erreur lors de l'export :\n{e}")
+
     def open_edit_task_window(self, task, parent_window):
         win = ctk.CTkToplevel(self)
         win.title("Modifier tâche")
         center_window(win, 350, 370)
-
+        # 👉 Mettre la fenêtre au premier plan
+        win.attributes('-topmost', True)
+        win.focus_force()
+        # 👉 Bloquer les interactions avec la fenêtre principale (optionnel mais utile)
+        win.grab_set()
         # Champs pré-remplis
         current_name = task['name']
         current_duration = task['duration']
@@ -299,6 +380,10 @@ class PlanningApp(ctk.CTk):
         import datetime
         from tkinter import messagebox
 
+        mois_nom = py_calendar.month_name[self.current_month] # ex: "Juin"
+        mois_str = f"{mois_nom} {self.current_year}"
+        self.lbl_month.configure(text=mois_str)
+
         # Supprime les anciens widgets
         for widget in self.inner_frame.winfo_children():
             widget.destroy()
@@ -372,7 +457,12 @@ class PlanningApp(ctk.CTk):
     def open_add_task_window(self):
         win = ctk.CTkToplevel(self)
         win.title("Ajouter tâche")
-        center_window(win, 350, 300)
+        center_window(win, 350, 350)
+        # 👉 Mettre la fenêtre au premier plan
+        win.attributes('-topmost', True)
+        win.focus_force()
+        # 👉 Bloquer les interactions avec la fenêtre principale (optionnel mais utile)
+        win.grab_set()
 
         ctk.CTkLabel(win, text="Nom tâche:").pack(pady=5)
         name_var = tk.StringVar()
@@ -380,8 +470,11 @@ class PlanningApp(ctk.CTk):
         name_combo.pack()
 
         ctk.CTkLabel(win, text="Personne:").pack(pady=5)
-        person_var = tk.StringVar(value=self.persons[0])
+        #person_var = tk.StringVar(value=self.persons[0])
+        person_var = tk.StringVar()
         person_combo = ttk.Combobox(win, values=self.persons, textvariable=person_var, state="readonly")
+
+        #person_combo = ttk.Combobox(win, values=self.persons, textvariable=person_var, state="readonly")
         person_combo.pack()
 
         ctk.CTkLabel(win, text="Date (YYYY-MM-DD):").pack(pady=5)
@@ -446,10 +539,30 @@ class PlanningApp(ctk.CTk):
         win = ctk.CTkToplevel(self)
         win.title("Gestion des jours de repos")
         center_window(win, 400, 400)
-
+        # 👉 Mettre la fenêtre au premier plan
+        win.attributes('-topmost', True)
+        win.focus_force()
+        # 👉 Bloquer les interactions avec la fenêtre principale (optionnel mais utile)
+        win.grab_set()
+        # 👉 style applique au combobox
+        style = ttk.Style()
+        style.theme_use("default")  # 👈 Important : change le thème
+        style.configure("CustomCombobox.TCombobox",
+                        font=("Arial", 20),  # Police et taille
+                        padding=5)  # Optionnel : un peu d'espace
         person_var = tk.StringVar(value=self.persons[0])
-        person_combo = ttk.Combobox(win, values=self.persons, textvariable=person_var, state="readonly")
+        person_combo = ttk.Combobox(win,
+                                    values=self.persons,
+                                    textvariable=person_var,
+                                    state="readonly",
+                                    style="CustomCombobox.TCombobox")
         person_combo.pack(pady=10)
+
+
+
+
+        #person_combo = ttk.Combobox(win, values=self.persons, textvariable=person_var, state="readonly")
+        #person_combo.pack(pady=10)
 
         rest_listbox = tk.Listbox(win)
         rest_listbox.pack(expand=True, fill="both", padx=10, pady=10)
@@ -522,7 +635,32 @@ class PlanningApp(ctk.CTk):
 
         ctk.CTkButton(win, text="Fermer", command=win.destroy).pack(pady=10)
 
-    def export_to_excel(self):
-        # Placeholder pour export, à compléter si tu veux
-        messagebox.showinfo("Export Excel", "Fonction d'export Excel non implémentée.")
+    import openpyxl
+
+    def export_to_excel(persons, task_manager, rest_days, start_date, filename):
+        from openpyxl import Workbook
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Planning"
+
+        # En-têtes
+        ws.append(["Nom", "Date", "Shift", "Tâche", "Durée (min)", "Repos ?"])
+
+        for person in persons:
+            for day_offset in range(31):  # Exporte jusqu'à 31 jours
+                date = start_date + datetime.timedelta(days=day_offset)
+                tasks = task_manager.get_tasks_for(person, date, 0)
+                is_rest = date in rest_days.get(person, [])
+                for task in tasks:
+                    ws.append([
+                        person,
+                        date.strftime("%Y-%m-%d"),
+                        0,
+                        task['name'],
+                        task['duration'],
+                        "Oui" if is_rest else "Non"
+                    ])
+
+        wb.save(filename)
+
 
