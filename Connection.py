@@ -1,11 +1,13 @@
-
 import tkinter as tk
 import customtkinter as ctk
 from tkinter import messagebox
-from ui import PlanningApp
-import auth
+from ui import PlanningApp  # Ton application principale
 
-auth.setup_user_table()  # Crée la table users si elle n'existe pas
+# Exemple simplifié (tu peux remplacer par vérification en base)
+USERS = {
+    "admin": "1234",
+    "user": "pass"
+}
 
 class LoginWindow(ctk.CTk):
     def __init__(self):
@@ -13,6 +15,7 @@ class LoginWindow(ctk.CTk):
         self.title("Connexion")
         self.geometry("300x200")
         self.eval('tk::PlaceWindow . center')
+        self.resizable(False, False)
 
         ctk.CTkLabel(self, text="Nom d'utilisateur").pack(pady=5)
         self.username_var = tk.StringVar()
@@ -22,21 +25,22 @@ class LoginWindow(ctk.CTk):
         self.password_var = tk.StringVar()
         ctk.CTkEntry(self, textvariable=self.password_var, show="*").pack()
 
-        ctk.CTkButton(self, text="Connexion", command=self.try_login).pack(pady=15)
+        ctk.CTkButton(self, text="Se connecter", command=self.check_login).pack(pady=15)
 
-    def try_login(self):
-        username = self.username_var.get().strip()
-        password = self.password_var.get().strip()
+    def check_login(self):
+        username = self.username_var.get()
+        password = self.password_var.get()
 
-        if auth.check_credentials(username, password):
+        if USERS.get(username) == password:
             self.destroy()
-            role = auth.get_role(username)
-            app = PlanningApp(username=username,role= role)
-            app.mainloop()
+            self.open_main_app()
         else:
             messagebox.showerror("Erreur", "Identifiants incorrects")
+
+    def open_main_app(self):
+        app = PlanningApp()
+        app.mainloop()
 
 if __name__ == "__main__":
     login = LoginWindow()
     login.mainloop()
-

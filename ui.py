@@ -5,7 +5,10 @@ import tkinter as tk
 from tkinter import messagebox, ttk, filedialog, simpledialog
 import datetime
 import sqlite3
+
+from auth import get_db_connection, get_shift_max_load
 from exporter import export_to_excel
+from tkcalendar import DateEntry
 
 # --- Constantes et données ---
 SHIFTS = [
@@ -35,7 +38,10 @@ TASK_NAMES = [
     "Nettoyage",
     "Test",
     "Préparation",
-    "Contrôle qualité"
+    "Contrôle qualité",
+    "Chambre",
+    "Cuisine",
+    "Inventaire"
 ]
 
 DURATION_OPTIONS = [15, 30, 45, 60, 90, 120, 180]
@@ -78,22 +84,32 @@ def calculate_loads(tasks):
         loads[key] = loads.get(key, 0) + t['duration']
     return loads
 
-def detect_overloads(tasks, max_by_shift=MAX_SHIFT_LOADS):
-    loads = calculate_loads(tasks)
-    overloads = {}
-    for (person, date, shift), dur in loads.items():
-        max_load = max_by_shift.get(shift, 240)
-        if dur > max_load:
-            overloads[(person, date, shift)] = dur
-    return overloads
+
+def detect_overloads(tasks):
+        # Charger dynamiquement les max_load depuis la base
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT id, max_load FROM shifts")
+            max_by_shift = {row[0]: row[1] for row in cursor.fetchall()}
+
+        loads = calculate_loads(tasks)
+        overloads = {}
+        for (person, date, shift), dur in loads.items():
+            max_load = max_by_shift.get(shift, 240)  # fallback 240 si shift inconnu
+            if dur > max_load:
+                overloads[(person, date, shift)] = dur
+        return overloads
+
 
 # --- Fenêtre principale ---
 class PlanningApp(ctk.CTk):
-    def __init__(self):
+    def __init__(self,username=None,role=None):
         super().__init__()
         self.on_export_button_click = None
-
-        self.title("Planning Manager")
+        self.username = username
+        self.role = role
+        self.title(f"Planning - Connecté en tant que {self.username} role : {role}")
+        #self.title("Planning Manager")
         self.geometry("1200x700")
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("dark-blue")
@@ -110,6 +126,7 @@ class PlanningApp(ctk.CTk):
 
         # Charger personnes depuis la BDD
         self.load_persons_from_db()  # 🔁 on récupère self.persons et self.person_colors
+        self.load_rest_days_from_db() # 🔁 on récupère self.name et self.date jour de repos
 
         # Initialiser jours de repos
         self.rest_days = {p: [] for p in self.persons}  # ✅ basé sur self.persons chargé depuis la BDD
@@ -145,6 +162,10 @@ class PlanningApp(ctk.CTk):
 
         self.btn_add_task = ctk.CTkButton(nav_frame, text="Ajouter tâche", command=self.open_add_task_window)
         self.btn_add_task.pack(side="right", padx=10)
+
+        self.btn_manage_task_types = ctk.CTkButton(nav_frame, text="Gérer types tâches",
+                                                   command=self.open_manage_task_types_window)
+        self.btn_manage_task_types.pack(side="right", padx=10)
 
         self.btn_show_overloads = ctk.CTkButton(nav_frame, text="Voir surcharges", command=self.show_overloads)
         self.btn_show_overloads.pack(side="right", padx=10)
@@ -193,6 +214,50 @@ class PlanningApp(ctk.CTk):
                   color TEXT NOT NULL
               )
           """)
+        # Table des Repos
+        self.cursor.execute("""
+            CREATE TABLE IF NOT EXISTS rest_days (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                person TEXT NOT NULL,
+                date TEXT NOT NULL,
+                UNIQUE(person, date)
+            )
+        """)
+        # Table des Task
+        self.cursor.execute("""
+            CREATE TABLE IF NOT EXISTS task_types (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT UNIQUE NOT NULL
+            )
+        """)
+        # Création initiale (si jamais la table n'existe pas)
+        self.cursor.execute("""
+            CREATE TABLE IF NOT EXISTS task_types (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT UNIQUE NOT NULL,
+                default_duration INTEGER DEFAULT 60
+            )
+        """)
+        self.conn.commit()
+
+        # Ajout colonne default_duration si elle n'existe pas encore
+        try:
+            self.cursor.execute("ALTER TABLE task_types ADD COLUMN default_duration INTEGER DEFAULT 60")
+            self.conn.commit()
+        except sqlite3.OperationalError as e:
+            # Cette erreur arrive si la colonne existe déjà
+            print("La colonne default_duration existe déjà ou autre erreur :", e)
+
+        self.conn.commit()
+
+        self.cursor.execute("SELECT COUNT(*) FROM task_types")
+        if self.cursor.fetchone()[0] == 0:
+            default_tasks = [
+                ("Maintenance",), ("Réparation",), ("Inspection",),
+                ("Nettoyage",), ("Test",), ("Préparation",),
+                ("Contrôle qualité",), ("Chambre",), ("Cuisine",), ("Inventaire",)
+            ]
+            self.cursor.executemany("INSERT INTO task_types (name) VALUES (?)", default_tasks)
 
         self.cursor.execute("SELECT COUNT(*) FROM persons")
         if self.cursor.fetchone()[0] == 0:
@@ -227,7 +292,20 @@ class PlanningApp(ctk.CTk):
         self.person_colors = {row[0]: row[1] for row in rows}
 
 
+    def load_rest_days_from_db(self):
+        self.rest_days = {}
+        self.cursor.execute("SELECT person, date FROM rest_days")
+        rows = self.cursor.fetchall()
+        for person, date_str in rows:
+            date = datetime.datetime.strptime(date_str, "%Y-%m-%d").date()
+            self.rest_days.setdefault(person, []).append(date)
+        for dates in self.rest_days.values():
+            dates.sort()
 
+    def load_task_names(self):
+        self.cursor.execute("SELECT name FROM task_types ORDER BY name")
+        rows = self.cursor.fetchall()
+        return [r[0] for r in rows]
 
     def show_task_details_popup(self, person, date, shift):
         win = ctk.CTkToplevel(self)
@@ -240,7 +318,11 @@ class PlanningApp(ctk.CTk):
 
         tasks = self.task_manager.get_tasks_for(person, date, shift)
         total_duration = sum(t['duration'] for t in tasks)
-        max_load = MAX_SHIFT_LOADS.get(shift, 240)
+        #max_load = MAX_SHIFT_LOADS.get(shift, 240)
+        max_load = get_shift_max_load(shift)
+        if max_load is None:
+            max_load = 240  # Valeur par défaut si non trouvée
+
 
         if total_duration > max_load:
             alert_text = f"Surcharge détectée : {total_duration} min / {max_load} min ⚠️"
@@ -350,7 +432,8 @@ class PlanningApp(ctk.CTk):
                     continue
                 if t['assigned_to'] == (new_person, new_date, new_shift):
                     total += t['duration']
-            max_load = MAX_SHIFT_LOADS.get(new_shift, 240)
+            #max_load = MAX_SHIFT_LOADS.get(new_shift, 240)
+            max_load = get_shift_max_load(new_shift)
             if total > max_load:
                 messagebox.showerror("Erreur", "Surcharge détectée, modification refusée")
                 return
@@ -427,18 +510,34 @@ class PlanningApp(ctk.CTk):
                 else:
                     # Chercher les tâches pour ce jour, cette personne et shift 0
                     tasks = [t for t in self.task_manager.get_tasks() if t['assigned_to'] == (person, date, 0)]
-                    color = self.person_colors.get(person, "#450")
                     btn_text = f"{len(tasks)} tâche(s)" if tasks else ""
+                    default_color = self.person_colors.get(person, "#450")
+
+                    # Détecter surcharge pour ce triplet
+                    overloads = detect_overloads(self.task_manager.get_tasks())
+                    is_overloaded = (person, date, 0) in overloads
+
+                    # Couleur spéciale si surcharge
+                    fg_color = "#d00" if is_overloaded else default_color
+                    text_color = "white" if is_overloaded else "black"
+                    btn_text = f"{btn_text} ⚠️" if is_overloaded else btn_text
+
                     btn = ctk.CTkButton(
                         self.inner_frame,
                         text=btn_text,
                         width=70,
                         height=30,
-                        fg_color=color,
+                        fg_color=fg_color,
+                        text_color=text_color,
                         command=lambda p=person, d=date, s=0: self.show_task_details_popup(p, d, s)
                     )
 
                 btn.grid(row=row + 1, column=col + 1, padx=2, pady=2)
+
+    def load_task_types(self):
+        self.cursor.execute("SELECT name, default_duration FROM task_types ORDER BY name")
+        rows = self.cursor.fetchall()
+        return {name: default_duration for name, default_duration in rows}
 
     def prev_month(self):
         self.current_month -= 1
@@ -454,33 +553,32 @@ class PlanningApp(ctk.CTk):
             self.current_year += 1
         self.refresh_planning_table()
 
+
+# fenetre task
     def open_add_task_window(self):
         win = ctk.CTkToplevel(self)
         win.title("Ajouter tâche")
         center_window(win, 350, 350)
-        # 👉 Mettre la fenêtre au premier plan
         win.attributes('-topmost', True)
         win.focus_force()
-        # 👉 Bloquer les interactions avec la fenêtre principale (optionnel mais utile)
         win.grab_set()
 
         ctk.CTkLabel(win, text="Nom tâche:").pack(pady=5)
         name_var = tk.StringVar()
-        name_combo = ttk.Combobox(win, values=TASK_NAMES, textvariable=name_var)
+        task_types = self.load_task_types()
+        task_names = list(task_types.keys())
+        name_combo = ttk.Combobox(win, values=task_names, textvariable=name_var, state="readonly")
         name_combo.pack()
 
         ctk.CTkLabel(win, text="Personne:").pack(pady=5)
-        #person_var = tk.StringVar(value=self.persons[0])
         person_var = tk.StringVar()
         person_combo = ttk.Combobox(win, values=self.persons, textvariable=person_var, state="readonly")
-
-        #person_combo = ttk.Combobox(win, values=self.persons, textvariable=person_var, state="readonly")
         person_combo.pack()
 
-        ctk.CTkLabel(win, text="Date (YYYY-MM-DD):").pack(pady=5)
-        date_var = tk.StringVar(value=format_date(datetime.date.today()))
-        date_entry = ctk.CTkEntry(win, textvariable=date_var)
-        date_entry.pack()
+        ctk.CTkLabel(win, text="Date:").pack(pady=5)
+
+        date_entry = DateEntry(win, date_pattern="yyyy-mm-dd", font=("Arial", 12))
+        date_entry.pack(pady=5)
 
         ctk.CTkLabel(win, text="Shift (0,1,2):").pack(pady=5)
         shift_var = tk.IntVar(value=0)
@@ -492,11 +590,21 @@ class PlanningApp(ctk.CTk):
         duration_combo = ttk.Combobox(win, values=DURATION_OPTIONS, textvariable=duration_var, state="readonly")
         duration_combo.pack()
 
+        # Met à jour la durée quand on change la tâche
+        def on_task_selected(event):
+            selected_task = name_var.get()
+            default_dur = task_types.get(selected_task, 15)
+            duration_var.set(default_dur)
+
+        name_combo.bind("<<ComboboxSelected>>", on_task_selected)
+
         def add_task_action():
             name = name_var.get().strip()
             person = person_var.get()
+            #date_var = date_entry.get_date()  # Cela retourne un objet datetime.date
+
             try:
-                date = datetime.datetime.strptime(date_var.get(), "%Y-%m-%d").date()
+                date = date = date_entry.get_date()
             except ValueError:
                 messagebox.showerror("Erreur", "Date invalide")
                 return
@@ -509,7 +617,9 @@ class PlanningApp(ctk.CTk):
             for t in tasks:
                 if t['assigned_to'] == (person, date, shift):
                     total += t['duration']
-            max_load = MAX_SHIFT_LOADS.get(shift, 240)
+            max_load = get_shift_max_load(shift)
+            if max_load is None:
+                max_load = 240  # Valeur par défaut si non trouvée
             if total > max_load:
                 messagebox.showerror("Erreur", "Surcharge détectée, tâche non ajoutée")
                 return
@@ -535,21 +645,28 @@ class PlanningApp(ctk.CTk):
         btn_add = ctk.CTkButton(win, text="Ajouter", command=add_task_action)
         btn_add.pack(pady=10)
 
+        # Sélectionne la première tâche par défaut pour initialiser la durée
+        if task_names:
+            name_var.set(task_names[0])
+            duration_var.set(task_types[task_names[0]])
+
+    # gestion des jours de repos windows
     def open_manage_rest_window(self):
         win = ctk.CTkToplevel(self)
         win.title("Gestion des jours de repos")
-        center_window(win, 400, 400)
-        # 👉 Mettre la fenêtre au premier plan
+        center_window(win, 400, 450)
         win.attributes('-topmost', True)
         win.focus_force()
-        # 👉 Bloquer les interactions avec la fenêtre principale (optionnel mais utile)
         win.grab_set()
-        # 👉 style applique au combobox
+
+        # Style pour Combobox
         style = ttk.Style()
-        style.theme_use("default")  # 👈 Important : change le thème
+        style.theme_use("default")
         style.configure("CustomCombobox.TCombobox",
-                        font=("Arial", 20),  # Police et taille
-                        padding=5)  # Optionnel : un peu d'espace
+                        font=("Arial", 20),
+                        padding=5)
+
+        # Sélecteur de personne
         person_var = tk.StringVar(value=self.persons[0])
         person_combo = ttk.Combobox(win,
                                     values=self.persons,
@@ -558,65 +675,124 @@ class PlanningApp(ctk.CTk):
                                     style="CustomCombobox.TCombobox")
         person_combo.pack(pady=10)
 
+        # Sélecteur de date (calendrier interactif)
+        date_label = ctk.CTkLabel(win, text="Choisissez une date :", font=("Arial", 14))
+        date_label.pack()
+        date_entry = DateEntry(win, date_pattern="yyyy-mm-dd", font=("Arial", 14))
+        date_entry.pack(pady=5)
 
-
-
-        #person_combo = ttk.Combobox(win, values=self.persons, textvariable=person_var, state="readonly")
-        #person_combo.pack(pady=10)
-
-        rest_listbox = tk.Listbox(win)
+        # Liste des jours de repos
+        rest_listbox = tk.Listbox(win, font=("Arial", 13))
         rest_listbox.pack(expand=True, fill="both", padx=10, pady=10)
 
         def refresh_rest_list():
             rest_listbox.delete(0, tk.END)
             p = person_var.get()
-            for d in self.rest_days.get(p, []):
+            for d in sorted(self.rest_days.get(p, [])):
                 rest_listbox.insert(tk.END, format_date(d))
 
         def add_rest_day():
             try:
-                date_str = simpledialog.askstring("Ajouter jour repos", "Date (YYYY-MM-DD):")
-                if date_str is None:
+                date_str = date_entry.get()
+                if not date_str:
                     return
                 d = datetime.datetime.strptime(date_str, "%Y-%m-%d").date()
             except ValueError:
                 messagebox.showerror("Erreur", "Date invalide")
                 return
 
-            p = person_var.get()  # Accès direct à person_var (pas self.person_var)
+            p = person_var.get()
             if not p:
                 messagebox.showerror("Erreur", "Veuillez sélectionner une personne")
                 return
 
-            if p not in self.rest_days:
-                self.rest_days[p] = []
-
-            if d not in self.rest_days[p]:
-                self.rest_days[p].append(d)
-                self.rest_days[p].sort()
-                refresh_rest_list()
-                self.refresh_planning_table()
+            if d not in self.rest_days.get(p, []):
+                try:
+                    self.cursor.execute("INSERT INTO rest_days (person, date) VALUES (?, ?)", (p, date_str))
+                    self.conn.commit()
+                    self.rest_days.setdefault(p, []).append(d)
+                    self.rest_days[p].sort()
+                    refresh_rest_list()
+                    self.refresh_planning_table()
+                except sqlite3.IntegrityError:
+                    messagebox.showinfo("Info", "Ce jour est déjà enregistré comme jour de repos.")
             else:
                 messagebox.showinfo("Info", "Ce jour est déjà un jour de repos pour cette personne.")
 
         def remove_selected_rest():
+            p = person_var.get()
             sel = rest_listbox.curselection()
             if not sel:
                 return
-            p = person_var.get()
             idx = sel[0]
+            d = self.rest_days[p][idx]
+            self.cursor.execute("DELETE FROM rest_days WHERE person = ? AND date = ?", (p, format_date(d)))
+            self.conn.commit()
             del self.rest_days[p][idx]
             refresh_rest_list()
             self.refresh_planning_table()
 
-        btn_add = ctk.CTkButton(win, text="Ajouter repos", command=add_rest_day)
-        btn_add.pack(side="left", padx=10, pady=5)
+        # Boutons
+        btn_frame = ctk.CTkFrame(win)
+        btn_frame.pack(pady=10)
 
-        btn_remove = ctk.CTkButton(win, text="Supprimer repos", command=remove_selected_rest)
-        btn_remove.pack(side="left", padx=10, pady=5)
+        btn_add = ctk.CTkButton(btn_frame, text="Ajouter repos", command=add_rest_day)
+        btn_add.pack(side="left", padx=10)
+
+        btn_remove = ctk.CTkButton(btn_frame, text="Supprimer repos", command=remove_selected_rest)
+        btn_remove.pack(side="left", padx=10)
 
         person_combo.bind("<<ComboboxSelected>>", lambda e: refresh_rest_list())
         refresh_rest_list()
+
+    def open_manage_task_types_window(self):
+        win = ctk.CTkToplevel(self)
+        win.title("Gérer les types de tâches")
+        center_window(win, 400, 400)
+        win.grab_set()
+        win.attributes('-topmost', True)
+        win.focus_force()
+
+        # Liste des tâches
+        task_listbox = tk.Listbox(win)
+        task_listbox.pack(expand=True, fill="both", padx=10, pady=10)
+
+        def refresh_task_list():
+            task_listbox.delete(0, tk.END)
+            task_names = self.load_task_names()
+            for t in task_names:
+                task_listbox.insert(tk.END, t)
+
+        def add_task_type():
+            new_task = simpledialog.askstring("Ajouter type tâche", "Nom du nouveau type de tâche :", parent=win)
+            if new_task:
+                try:
+                    self.cursor.execute("INSERT INTO task_types (name) VALUES (?)", (new_task,))
+                    self.conn.commit()
+                    refresh_task_list()
+                except sqlite3.IntegrityError:
+                    messagebox.showerror("Erreur", "Ce type de tâche existe déjà.", parent=win)
+
+        def remove_task_type():
+            sel = task_listbox.curselection()
+            if not sel:
+                return
+            task_to_remove = task_listbox.get(sel[0])
+            if messagebox.askyesno("Confirmer", f"Supprimer le type de tâche '{task_to_remove}' ?", parent=win):
+                self.cursor.execute("DELETE FROM task_types WHERE name = ?", (task_to_remove,))
+                self.conn.commit()
+                refresh_task_list()
+
+        btn_frame = ctk.CTkFrame(win)
+        btn_frame.pack(fill="x", pady=5)
+
+        btn_add = ctk.CTkButton(btn_frame, text="Ajouter", command=add_task_type)
+        btn_add.pack(side="left", padx=10)
+
+        btn_remove = ctk.CTkButton(btn_frame, text="Supprimer", command=remove_task_type)
+        btn_remove.pack(side="left", padx=10)
+
+        refresh_task_list()
 
     def show_overloads(self):
         overloads = detect_overloads(self.task_manager.get_tasks())
@@ -629,7 +805,9 @@ class PlanningApp(ctk.CTk):
         center_window(win, 400, 300)
 
         for (person, date, shift), duration in overloads.items():
-            max_load = MAX_SHIFT_LOADS.get(shift, 240)
+            max_load = get_shift_max_load(shift)
+            if max_load is None:
+                max_load = 240  # Valeur par défaut si non trouvée
             lbl = ctk.CTkLabel(win, text=f"{person} le {format_date(date)} (Shift {shift}): {duration} min / {max_load} min", fg_color="#ff5555", corner_radius=5)
             lbl.pack(pady=5, padx=10, fill="x")
 
