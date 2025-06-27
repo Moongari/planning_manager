@@ -99,6 +99,17 @@ def get_shift_max_load(shift_id):
 
 
 
+def get_all_shifts():
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, name, max_load FROM shifts")
+        return cursor.fetchall()
+
+def update_shift_max_load(shift_id, new_max_load):
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("UPDATE shifts SET max_load = ? WHERE id = ?", (new_max_load, shift_id))
+        conn.commit()
 
 
 if __name__ == "__main__":

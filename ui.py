@@ -5,7 +5,8 @@ import tkinter as tk
 from tkinter import messagebox, ttk, filedialog, simpledialog
 import datetime
 import sqlite3
-
+import openpyxl
+import auth
 from auth import get_db_connection, get_shift_max_load
 from exporter import export_to_excel
 from tkcalendar import DateEntry
@@ -105,6 +106,7 @@ def detect_overloads(tasks):
 class PlanningApp(ctk.CTk):
     def __init__(self,username=None,role=None):
         super().__init__()
+        self.sidebar = None
         self.on_export_button_click = None
         self.username = username
         self.role = role
@@ -133,6 +135,8 @@ class PlanningApp(ctk.CTk):
 
         # Charger tâches depuis la BDD
         self.load_tasks_from_db()
+
+        self.role = auth.get_role(username)  # recupere le role du user
 
         # Initialiser mois courant
         today = datetime.date.today()
@@ -190,6 +194,10 @@ class PlanningApp(ctk.CTk):
             command=self.on_export_button_click_handler  # Appelle une fonction que tu vas ajouter juste après
         )
         self.btn_export_excel.pack(side="right", padx=10)
+        
+        if self.role == 'admin':
+            btn = ctk.CTkButton(self.sidebar, text="Gérer les shifts", command=self.open_shift_management_window)
+            btn.pack(pady=10)
 
         self.refresh_planning_table()
 
@@ -553,8 +561,42 @@ class PlanningApp(ctk.CTk):
             self.current_year += 1
         self.refresh_planning_table()
 
+    def open_shift_management_window(self):
+        win = ctk.CTkToplevel(self)
+        win.title("Gestion des Shifts")
+        win.geometry("400x250")
+        win.attributes('-topmost', True)
+        win.focus_force()
 
-# fenetre task
+        shifts = auth.get_all_shifts()  # liste de tuples (id, name, max_load)
+
+        entries = {}
+
+        for i, (shift_id, name, max_load) in enumerate(shifts):
+            ctk.CTkLabel(win, text=f"{name} (Shift {shift_id})").grid(row=i, column=0, padx=10, pady=5, sticky="w")
+
+            var = tk.StringVar(value=str(max_load))  # 🔄 Utiliser StringVar
+            entry = ctk.CTkEntry(win, textvariable=var)
+            entry.grid(row=i, column=1, padx=10, pady=5)
+
+            entries[shift_id] = var  # 👈 On garde les StringVar pour les traiter plus tard
+
+        def save_updates():
+            for shift_id, var in entries.items():
+                value_str = var.get().strip()
+                if value_str:
+                    try:
+                        new_value = int(value_str)
+                        auth.update_shift_max_load(shift_id, new_value)  # À adapter
+                    except ValueError:
+                        messagebox.showerror("Erreur", f"Valeur invalide pour Shift {shift_id}")
+                else:
+                    messagebox.showerror("Erreur", f"Champ vide pour Shift {shift_id}")
+            win.destroy()
+
+        ctk.CTkButton(win, text="Enregistrer", command=save_updates).grid(columnspan=2, pady=15)
+
+    # fenetre task
     def open_add_task_window(self):
         win = ctk.CTkToplevel(self)
         win.title("Ajouter tâche")
@@ -813,7 +855,7 @@ class PlanningApp(ctk.CTk):
 
         ctk.CTkButton(win, text="Fermer", command=win.destroy).pack(pady=10)
 
-    import openpyxl
+
 
     def export_to_excel(persons, task_manager, rest_days, start_date, filename):
         from openpyxl import Workbook
